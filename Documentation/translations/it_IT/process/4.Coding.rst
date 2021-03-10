@@ -256,7 +256,7 @@ e cercate di evitare le "riparazioni" che fan sparire l'avvertimento senza
 però averne trovato la causa.
 
 Tenete a mente che non tutti gli avvertimenti sono disabilitati di default.
-Costruite il kernel con "make EXTRA_CFLAGS=-W" per ottenerli tutti.
+Costruite il kernel con "make KCFLAGS=-W" per ottenerli tutti.
 
 Il kernel fornisce differenti opzioni che abilitano funzionalità di debugging;
 molti di queste sono trovano all'interno del sotto menu "kernel hacking".
@@ -314,7 +314,7 @@ di allocazione di memoria sarà destinata al fallimento; questi fallimenti
 possono essere ridotti ad uno specifico pezzo di codice.  Procedere con
 l'inserimento dei fallimenti attivo permette al programmatore di verificare
 come il codice risponde quando le cose vanno male.  Consultate:
-Documentation/fault-injection/fault-injection.txt per avere maggiori
+Documentation/fault-injection/fault-injection.rst per avere maggiori
 informazioni su come utilizzare questo strumento.
 
 Altre tipologie di errori possono essere riscontrati con lo strumento di

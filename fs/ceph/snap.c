@@ -3,6 +3,7 @@
 
 #include <linux/sort.h>
 #include <linux/slab.h>
+#include <linux/iversion.h>
 #include "super.h"
 #include "mds_client.h"
 #include <linux/ceph/decode.h>
@@ -464,6 +465,7 @@ void ceph_queue_cap_snap(struct ceph_inode_info *ci)
 	struct inode *inode = &ci->vfs_inode;
 	struct ceph_cap_snap *capsnap;
 	struct ceph_snap_context *old_snapc, *new_snapc;
+	struct ceph_buffer *old_blob = NULL;
 	int used, dirty;
 
 	capsnap = kzalloc(sizeof(*capsnap), GFP_NOFS);
@@ -540,7 +542,7 @@ void ceph_queue_cap_snap(struct ceph_inode_info *ci)
 	capsnap->gid = inode->i_gid;
 
 	if (dirty & CEPH_CAP_XATTR_EXCL) {
-		__ceph_build_xattrs_blob(ci);
+		old_blob = __ceph_build_xattrs_blob(ci);
 		capsnap->xattr_blob =
 			ceph_buffer_get(ci->i_xattrs.blob);
 		capsnap->xattr_version = ci->i_xattrs.version;
@@ -572,12 +574,18 @@ void ceph_queue_cap_snap(struct ceph_inode_info *ci)
 	old_snapc = NULL;
 
 update_snapc:
-	if (ci->i_head_snapc) {
+       if (ci->i_wrbuffer_ref_head == 0 &&
+           ci->i_wr_ref == 0 &&
+           ci->i_dirty_caps == 0 &&
+           ci->i_flushing_caps == 0) {
+               ci->i_head_snapc = NULL;
+       } else {
 		ci->i_head_snapc = ceph_get_snap_context(new_snapc);
 		dout(" new snapc is %p\n", new_snapc);
 	}
 	spin_unlock(&ci->i_ceph_lock);
 
+	ceph_buffer_put(old_blob);
 	kfree(capsnap);
 	ceph_put_snap_context(old_snapc);
 }
@@ -594,13 +602,15 @@ int __ceph_finish_cap_snap(struct ceph_inode_info *ci,
 			    struct ceph_cap_snap *capsnap)
 {
 	struct inode *inode = &ci->vfs_inode;
-	struct ceph_mds_client *mdsc = ceph_sb_to_client(inode->i_sb)->mdsc;
+	struct ceph_mds_client *mdsc = ceph_sb_to_mdsc(inode->i_sb);
 
 	BUG_ON(capsnap->writing);
 	capsnap->size = inode->i_size;
 	capsnap->mtime = inode->i_mtime;
 	capsnap->atime = inode->i_atime;
 	capsnap->ctime = inode->i_ctime;
+	capsnap->btime = ci->i_btime;
+	capsnap->change_attr = inode_peek_iversion_raw(inode);
 	capsnap->time_warp_seq = ci->i_time_warp_seq;
 	capsnap->truncate_size = ci->i_truncate_size;
 	capsnap->truncate_seq = ci->i_truncate_seq;
@@ -610,6 +620,16 @@ int __ceph_finish_cap_snap(struct ceph_inode_info *ci,
 		     capsnap->context, capsnap->context->seq,
 		     ceph_cap_string(capsnap->dirty), capsnap->size,
 		     capsnap->dirty_pages);
+		return 0;
+	}
+
+	/* Fb cap still in use, delay it */
+	if (ci->i_wb_ref) {
+		dout("finish_cap_snap %p cap_snap %p snapc %p %llu %s s=%llu "
+		     "used WRBUFFER, delaying\n", inode, capsnap,
+		     capsnap->context, capsnap->context->seq,
+		     ceph_cap_string(capsnap->dirty), capsnap->size);
+		capsnap->writing = 1;
 		return 0;
 	}
 
@@ -643,13 +663,15 @@ static void queue_realm_cap_snaps(struct ceph_snap_realm *realm)
 		if (!inode)
 			continue;
 		spin_unlock(&realm->inodes_with_caps_lock);
-		iput(lastinode);
+		/* avoid calling iput_final() while holding
+		 * mdsc->snap_rwsem or in mds dispatch threads */
+		ceph_async_iput(lastinode);
 		lastinode = inode;
 		ceph_queue_cap_snap(ci);
 		spin_lock(&realm->inodes_with_caps_lock);
 	}
 	spin_unlock(&realm->inodes_with_caps_lock);
-	iput(lastinode);
+	ceph_async_iput(lastinode);
 
 	dout("queue_realm_cap_snaps %p %llx done\n", realm, realm->ino);
 }
@@ -801,7 +823,9 @@ static void flush_snaps(struct ceph_mds_client *mdsc)
 		ihold(inode);
 		spin_unlock(&mdsc->snap_flush_lock);
 		ceph_flush_snaps(ci, &session);
-		iput(inode);
+		/* avoid calling iput_final() while holding
+		 * session->s_mutex or in mds dispatch threads */
+		ceph_async_iput(inode);
 		spin_lock(&mdsc->snap_flush_lock);
 	}
 	spin_unlock(&mdsc->snap_flush_lock);
@@ -859,7 +883,7 @@ void ceph_handle_snap(struct ceph_mds_client *mdsc,
 	     ceph_snap_op_name(op), split, trace_len);
 
 	mutex_lock(&session->s_mutex);
-	session->s_seq++;
+	inc_session_sequence(session);
 	mutex_unlock(&session->s_mutex);
 
 	down_write(&mdsc->snap_rwsem);
@@ -945,12 +969,14 @@ void ceph_handle_snap(struct ceph_mds_client *mdsc,
 			ceph_get_snap_realm(mdsc, realm);
 			ceph_put_snap_realm(mdsc, oldrealm);
 
-			iput(inode);
+			/* avoid calling iput_final() while holding
+			 * mdsc->snap_rwsem or mds in dispatch threads */
+			ceph_async_iput(inode);
 			continue;
 
 skip_inode:
 			spin_unlock(&ci->i_ceph_lock);
-			iput(inode);
+			ceph_async_iput(inode);
 		}
 
 		/* we may have taken some of the old realm's children. */
@@ -1139,5 +1165,6 @@ void ceph_cleanup_snapid_map(struct ceph_mds_client *mdsc)
 			pr_err("snapid map %llx -> %x still in use\n",
 			       sm->snap, sm->dev);
 		}
+		kfree(sm);
 	}
 }

@@ -3,7 +3,7 @@
  *
  * Name: actbl1.h - Additional ACPI table definitions
  *
- * Copyright (C) 2000 - 2019, Intel Corp.
+ * Copyright (C) 2000 - 2021, Intel Corp.
  *
  *****************************************************************************/
 
@@ -514,7 +514,8 @@ enum acpi_dmar_type {
 	ACPI_DMAR_TYPE_ROOT_ATS = 2,
 	ACPI_DMAR_TYPE_HARDWARE_AFFINITY = 3,
 	ACPI_DMAR_TYPE_NAMESPACE = 4,
-	ACPI_DMAR_TYPE_RESERVED = 5	/* 5 and greater are reserved */
+	ACPI_DMAR_TYPE_SATC = 5,
+	ACPI_DMAR_TYPE_RESERVED = 6	/* 6 and greater are reserved */
 };
 
 /* DMAR Device Scope structure */
@@ -607,6 +608,14 @@ struct acpi_dmar_andd {
 	char device_name[1];
 };
 
+/* 5: SOC Integrated Address Translation Cache Reporting Structure */
+
+struct acpi_dmar_satc {
+	struct acpi_dmar_header header;
+	u8 flags;
+	u8 reserved;
+	u16 segment;
+};
 /*******************************************************************************
  *
  * DRTM - Dynamic Root of Trust for Measurement table
@@ -862,7 +871,7 @@ enum acpi_erst_instructions {
 /* Command status return values */
 
 enum acpi_erst_command_status {
-	ACPI_ERST_SUCESS = 0,
+	ACPI_ERST_SUCCESS = 0,
 	ACPI_ERST_NO_SPACE = 1,
 	ACPI_ERST_NOT_AVAILABLE = 2,
 	ACPI_ERST_FAILURE = 3,
@@ -1395,7 +1404,7 @@ struct acpi_table_hmat {
 /* Values for HMAT structure types */
 
 enum acpi_hmat_type {
-	ACPI_HMAT_TYPE_ADDRESS_RANGE = 0,	/* Memory subsystem address range */
+	ACPI_HMAT_TYPE_PROXIMITY = 0,	/* Memory proximity domain attributes */
 	ACPI_HMAT_TYPE_LOCALITY = 1,	/* System locality latency and bandwidth information */
 	ACPI_HMAT_TYPE_CACHE = 2,	/* Memory side cache information */
 	ACPI_HMAT_TYPE_RESERVED = 3	/* 3 and greater are reserved */

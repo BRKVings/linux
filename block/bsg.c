@@ -1,13 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * bsg.c - block layer implementation of the sg v4 interface
- *
- * Copyright (C) 2004 Jens Axboe <axboe@suse.de> SUSE Labs
- * Copyright (C) 2004 Peter M. Jones <pjones@redhat.com>
- *
- *  This file is subject to the terms and conditions of the GNU General Public
- *  License version 2.  See the file "COPYING" in the main directory of this
- *  archive for more details.
- *
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -164,8 +157,10 @@ static int bsg_sg_io(struct request_queue *q, fmode_t mode, void __user *uarg)
 		return PTR_ERR(rq);
 
 	ret = q->bsg_dev.ops->fill_hdr(rq, &hdr, mode);
-	if (ret)
+	if (ret) {
+		blk_put_request(rq);
 		return ret;
+	}
 
 	rq->timeout = msecs_to_jiffies(hdr.timeout);
 	if (!rq->timeout)
@@ -188,7 +183,7 @@ static int bsg_sg_io(struct request_queue *q, fmode_t mode, void __user *uarg)
 
 	bio = rq->bio;
 
-	blk_execute_rq(q, NULL, rq, !(hdr.flags & BSG_FLAG_Q_AT_TAIL));
+	blk_execute_rq(NULL, rq, !(hdr.flags & BSG_FLAG_Q_AT_TAIL));
 	ret = rq->q->bsg_dev.ops->complete_rq(rq, &hdr);
 	blk_rq_unmap_user(bio);
 
@@ -389,6 +384,7 @@ static const struct file_operations bsg_fops = {
 	.open		=	bsg_open,
 	.release	=	bsg_release,
 	.unlocked_ioctl	=	bsg_ioctl,
+	.compat_ioctl	=	compat_ptr_ioctl,
 	.owner		=	THIS_MODULE,
 	.llseek		=	default_llseek,
 };

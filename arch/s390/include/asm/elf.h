@@ -107,6 +107,10 @@
 #define HWCAP_S390_VXRS_BCD	4096
 #define HWCAP_S390_VXRS_EXT	8192
 #define HWCAP_S390_GS		16384
+#define HWCAP_S390_VXRS_EXT2	32768
+#define HWCAP_S390_VXRS_PDE	65536
+#define HWCAP_S390_SORT		131072
+#define HWCAP_S390_DFLT		262144
 
 /* Internal bits, not exposed via elf */
 #define HWCAP_INT_SIE		1UL
@@ -229,8 +233,7 @@ extern char elf_platform[];
 do {								\
 	set_personality(PER_LINUX |				\
 		(current->personality & (~PER_MASK)));		\
-	current->thread.sys_call_table =			\
-		(unsigned long) &sys_call_table;		\
+	current->thread.sys_call_table = sys_call_table;	\
 } while (0)
 #else /* CONFIG_COMPAT */
 #define SET_PERSONALITY(ex)					\
@@ -241,11 +244,11 @@ do {								\
 	if ((ex).e_ident[EI_CLASS] == ELFCLASS32) {		\
 		set_thread_flag(TIF_31BIT);			\
 		current->thread.sys_call_table =		\
-			(unsigned long)	&sys_call_table_emu;	\
+			sys_call_table_emu;			\
 	} else {						\
 		clear_thread_flag(TIF_31BIT);			\
 		current->thread.sys_call_table =		\
-			(unsigned long) &sys_call_table;	\
+			sys_call_table;				\
 	}							\
 } while (0)
 #endif /* CONFIG_COMPAT */
